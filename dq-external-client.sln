@@ -7,7 +7,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Naveego.DQ.ExternalClient",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Naveego.DQ.ExternalClient.Test", "Naveego.DQ.ExternalClient.Test\Naveego.DQ.ExternalClient.Test.csproj", "{C8727890-AECD-409A-8404-E04A9488771B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalQualityCheckExample", "ExternalQualityCheckExample\ExternalQualityCheckExample.csproj", "{0CDAC4B1-C884-4FAF-877B-477BFAC42F4D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Example", "Example\Example.csproj", "{0CDAC4B1-C884-4FAF-877B-477BFAC42F4D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

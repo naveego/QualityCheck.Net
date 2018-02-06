@@ -5,9 +5,22 @@ using System.Net;
 using Newtonsoft.Json;
 using Naveego.DQ.ExternalClient.Internal;
 using Newtonsoft.Json.Converters;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
+using System.Threading;
 
 namespace Naveego.DQ.ExternalClient
 {
+    /// <summary>
+    /// Transport is used for communicating with the API.
+    /// It must be able to take a method, a path, and (for PUT and POST methods) some JSON,    
+    /// transmit that to the API, and return the response as a string.
+    /// </summary>
+    /// <param name="method"></param>
+    /// <param name="path"></param>
+    /// <param name="json"></param>
+    /// <returns></returns>
+    public delegate string Transport(string method, string path, string json);
 
     public class Client
     {
@@ -22,28 +35,85 @@ namespace Naveego.DQ.ExternalClient
                 DateFormatHandling = DateFormatHandling.IsoDateFormat,
             };
 
-        private readonly string token;
-        private readonly string baseUrl;
-        private readonly string proxyUrl;
-        private readonly int proxyPort;
+        public Action<string> Logger { get; set; }
 
+        public Transport Transport { get; set; }
+
+        /// <summary>
+        /// Create a Client which will use the default transport system,
+        /// configured with the provided values.
+        /// </summary>
+        /// <param name="baseUrl"></param>
+        /// <param name="token"></param>
+        /// <param name="proxyUrl"></param>
+        /// <param name="proxyPort"></param>
         public Client(string baseUrl, string token, string proxyUrl = null, int proxyPort = 80)
         {
-            this.proxyPort = proxyPort;
-            this.proxyUrl = proxyUrl;
-            this.baseUrl = baseUrl.TrimEnd('/');
-            this.token = token;
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                throw new ArgumentException("baseUrl is required", nameof(baseUrl));
+            }
+
+            if (string.IsNullOrEmpty(token))
+            {
+                throw new ArgumentException("token is required", nameof(token));
+            }
+
+            baseUrl = baseUrl.TrimEnd('/');
+
+            this.Transport = (method, path, json) =>
+            {
+                using (var wc = new System.Net.WebClient())
+                {
+                    if (proxyUrl != null)
+                    {
+                        wc.Proxy = new WebProxy(proxyUrl, proxyPort);
+                    }
+                    else
+                    {
+                        wc.Proxy = null;
+                    }
+
+                    wc.Headers.Add("Authorization", string.Format("Bearer {0}", token));
+
+                    var url = baseUrl + path;
+
+                    return wc.UploadString(url, method, json);
+                }
+            };
         }
 
-        public QualityCheckRun StartQualityCheck(string qualityCheckId)
+        /// <summary>
+        /// Create a client, providing a custom <see cname="Transport"/>.
+        /// </summary>
+        /// <param name="transport"></param>
+        public Client(Transport transport)
         {
+            this.Transport = transport;
+        }
 
-            // get quality check from API
+        /// <summary>
+        /// Start a QualityCheckRun using the provided <paramref name="qualityCheckId"/>.
+        /// This should always be invoked in a <c>using</c> statement.
+        /// </summary>
+        /// <param name="qualityCheckId"></param>
+        /// <returns></returns>
+        public QualityCheckRun StartQualityCheckRun(string qualityCheckId)
+        {
+            Log($"[StartQualityCheckRun] qualityCheckId: {qualityCheckId}");
 
             // create run and populate from quality check
-            var run = new RunDTO { };
+            var run = new RunDTO
+            {
 
-            this.Send("POST", "/v3/dataquality/runs", run);
+                Id = Guid.NewGuid().ToString("D"),
+                QueryId = qualityCheckId,
+                State = "running",
+                Status = "new",
+                StartedAt = DateTime.UtcNow,
+            };
+
+            this.Send("POST", "/v3/dataquality/runs/external", run);
 
             var qualityCheckRun = new QualityCheckRun(this, run);
 
@@ -52,26 +122,14 @@ namespace Naveego.DQ.ExternalClient
 
         internal void Send(string method, string path, object data)
         {
-            using (var wc = new System.Net.WebClient())
-            {
+            var json = JsonConvert.SerializeObject(data, jsonSerializerSettings);
+            Log($"[Send] method: {method}, path:{path}, data: {json}");
+            this.Transport(method, path, json);
+        }
 
-                if (this.proxyUrl != null)
-                {
-                    wc.Proxy = new WebProxy(this.proxyUrl, this.proxyPort);
-                }
-                else
-                {
-                    wc.Proxy = null;
-                }
-
-                wc.Headers.Add("Authorization", string.Format("Bearer {0}", this.token));
-
-                var body = JsonConvert.SerializeObject(data, jsonSerializerSettings);
-
-                var url = this.baseUrl + path;
-
-                wc.UploadString(url, method, body);
-            }
+        internal void Log(string message)
+        {
+            this.Logger?.Invoke(message);
         }
 
     }
@@ -83,15 +141,27 @@ namespace Naveego.DQ.ExternalClient
         private readonly Stopwatch timer;
         private readonly Client client;
         private readonly RunDTO run;
-        private readonly List<RunException> exceptions = new List<RunException>(EXCEPTION_BATCH_SIZE);
+        private readonly BlockingCollection<RunException> exceptionQueue = new BlockingCollection<RunException>(EXCEPTION_BATCH_SIZE * 2);
         private bool disposed;
         private string failureMessage;
+
+        private Exception apiException;
+
+        private Task<int> consumer;
+
+        /// <summary>
+        /// Contains any settings defined in the quality check.
+        /// </summary>
+        /// <returns></returns>
+        public string Configuration { get; set; }
 
         internal QualityCheckRun(Client client, RunDTO run)
         {
             this.client = client;
             this.run = run;
+            this.Configuration = run.Configuration;
             this.timer = Stopwatch.StartNew();
+            this.consumer = Task.Factory.StartNew(this.ConsumeExceptions);
         }
 
         /// <summary>
@@ -100,16 +170,19 @@ namespace Naveego.DQ.ExternalClient
         /// <param name="exceptions"></param>
         public void SendExceptions(params RunException[] exceptions)
         {
-            lock (exceptionLock)
+            if (disposed)
             {
-                if (disposed)
-                {
-                    throw new ObjectDisposedException(run.Id, "This run has been completed.");
-                }
+                throw new ObjectDisposedException(run.Id, "This run has been completed.");
+            }
 
-                this.run.ExceptionCount += exceptions.Length;
-                this.exceptions.AddRange(exceptions);
-                SendExceptionsBatch(false);
+            if (apiException != null)
+            {
+                throw new Exception("The Data Quality API is not available, or the configuration is incorrect. See internal exception and log for details.", apiException);
+            }
+
+            foreach (var exception in exceptions)
+            {
+                this.exceptionQueue.Add(exception);
             }
         }
 
@@ -120,7 +193,6 @@ namespace Naveego.DQ.ExternalClient
         public void Failed(string message)
         {
             this.failureMessage = message;
-
         }
 
         /// <summary>
@@ -134,13 +206,18 @@ namespace Naveego.DQ.ExternalClient
 
         public void Dispose()
         {
-            lock (exceptionLock)
+            if (disposed)
             {
-                this.disposed = true;
-                SendExceptionsBatch(true);
+                return;
             }
-
+            disposed = true;
             this.timer.Stop();
+
+            // Signal the sender that we're done adding exceptions.
+            this.exceptionQueue.CompleteAdding();
+
+            // This will block until sending is complete.
+            this.run.ExceptionCount = this.consumer.Result;
 
             this.run.QueryTime = this.timer.ElapsedMilliseconds;
 
@@ -154,29 +231,88 @@ namespace Naveego.DQ.ExternalClient
                 this.run.Status = "failed";
             }
 
-            this.client.Send("PUT", "/v3/dataquality/runs/" + this.run.Id, this.run);
+            this.client.Send("PUT", $"/v3/dataquality/runs/external/{this.run.Id}", this.run);
         }
 
-
-        private void SendExceptionsBatch(bool force)
+        private int ConsumeExceptions()
         {
-            var ready = this.exceptions.Count >= EXCEPTION_BATCH_SIZE
-                || (force && this.exceptions.Count > 0);
-            if (ready)
+            var count = 0;
+            var exceptions = new List<RunExceptionDTO>(EXCEPTION_BATCH_SIZE);
+
+            var runReference = new GuidReference
             {
-                this.timer.Stop();
+                Key = this.run.Id,
+                Name = this.run.Id
+            };
 
-                var message = new
+            foreach (var exception in this.exceptionQueue.GetConsumingEnumerable())
+            {
+                count++;
+                var dto = new RunExceptionDTO
                 {
-                    data = this.exceptions
+                    Id = Guid.NewGuid(),
+                    Run = runReference,
+                    RunStartedAt = this.run.StartedAt,
+                    Data = exception.Data,
+                    Description = exception.Description,
+                    Key = exception.Key,
+                    Label = exception.Label,
+                    Sequence = exception.Sequence,
+                    Timestamp = exception.Timestamp == DateTime.MinValue ? DateTime.Now : exception.Timestamp,
                 };
+                exceptions.Add(dto);
+                client.Log($"[ExceptionConsumer] Current count: {count}; Pending count: {exceptions.Count}");
+                if (exceptions.Count >= EXCEPTION_BATCH_SIZE)
+                {
+                    client.Log($"[ExceptionConsumer] Batch size reached, sending {exceptions.Count} exceptions to API.");
+                    this.SendExceptionsBatch(exceptions);
 
-                this.client.Send("POST", $"/v3/dataquality/runs/{this.run.Id}/exceptions", message);
-
-                this.exceptions.Clear();
-
-                this.timer.Start();
+                    client.Log($"[ExceptionConsumer] Exceptions sent to API, resetting pending list.");
+                    exceptions.Clear();
+                }
             }
+
+            client.Log($"[ExceptionConsumer] All exceptions received.");
+
+            if (exceptions.Count > 0)
+            {
+                client.Log($"[ExceptionConsumer] Flushing remaining {exceptions.Count} exceptions to API.");
+                this.SendExceptionsBatch(exceptions);
+            }
+
+            return count;
+        }
+
+        private void SendExceptionsBatch(List<RunExceptionDTO> exceptions)
+        {
+            this.timer.Stop();
+
+            var message = new
+            {
+                data = exceptions
+            };
+
+            try
+            {
+                this.client.Send("POST", $"/v3/dataquality/runs/external/{this.run.Id}/exceptions", message);
+            }
+            catch (Exception ex)
+            {
+                this.client.Log($"[ExceptionConsumer] Error sending exceptions to API. Will retry once in 5 seconds. Error was {ex}");
+                Thread.Sleep(5000);
+                try
+                {
+                    this.client.Send("POST", $"/v3/dataquality/runs/external/{this.run.Id}/exceptions", message);
+                }
+                catch (Exception ex2)
+                {
+                    this.client.Log($"[ExceptionConsumer] Error resending exceptions to API. Will abort and rethrow exception. Error was {ex2}");
+                    this.apiException = ex2;
+                    throw;
+                }
+            }
+
+            this.timer.Start();
         }
 
     }
