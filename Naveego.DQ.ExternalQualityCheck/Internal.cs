@@ -3,7 +3,7 @@ using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 using System;
 
-namespace Naveego.DQ.ExternalClient.Internal
+namespace Naveego.DQ.ExternalQualityCheck.Internal
 {
 
     internal class GuidReference

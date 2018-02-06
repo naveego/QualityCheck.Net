@@ -1,12 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <ItemGroup>
-    <ProjectReference Include="..\Naveego.DQ.ExternalClient\Naveego.DQ.ExternalClient.csproj" />
+    <ProjectReference Include="..\Naveego.DQ.ExternalQualityCheck\Naveego.DQ.ExternalQualityCheck.csproj" />
   </ItemGroup>
-
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>netcoreapp2.0</TargetFramework>
   </PropertyGroup>
-
 </Project>

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>Naveego.DQ.ExternalQualityCheck</PackageId>
+    <Version>0.0.1-beta</Version>
+    <Authors>Naveego</Authors>
+    <Company>Naveego</Company>
+    <Description>A library for creating external quality checks which record their results in the Naveego Data Quality system.</Description>
+    <PackageTags>Naveego;Data Quality</PackageTags>
+    <RepositoryUrl>https://github.com/naveego/QualityCheck.Net</RepositoryUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="10.0.3" />
+  </ItemGroup>
+</Project>

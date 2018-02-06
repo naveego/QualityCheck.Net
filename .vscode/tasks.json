@@ -7,7 +7,7 @@
             "type": "process",
             "args": [
                 "build",
-                "${workspaceFolder}/Naveego.DQ.ExternalClient.Test/Naveego.DQ.ExternalClient.Test.csproj"
+                "${workspaceFolder}/Naveego.DQ.ExternalQualityCheck.Test/Naveego.DQ.ExternalQualityCheck.Test.csproj"
             ],
             "problemMatcher": "$msCompile"
         }

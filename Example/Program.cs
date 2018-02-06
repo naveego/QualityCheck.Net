@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Threading;
-using Naveego.DQ.ExternalClient;
+using Naveego.DQ.ExternalQualityCheck;
 using Newtonsoft.Json.Linq;
 
 namespace ExternalQualityCheckExample

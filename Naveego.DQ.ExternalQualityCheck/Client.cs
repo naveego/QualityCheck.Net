@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using Newtonsoft.Json;
-using Naveego.DQ.ExternalClient.Internal;
+using Naveego.DQ.ExternalQualityCheck.Internal;
 using Newtonsoft.Json.Converters;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Threading;
 
-namespace Naveego.DQ.ExternalClient
+namespace Naveego.DQ.ExternalQualityCheck
 {
     /// <summary>
     /// Transport is used for communicating with the API.

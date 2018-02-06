@@ -2,7 +2,7 @@
 using System;
 using Newtonsoft.Json.Linq;
 
-namespace Naveego.DQ.ExternalClient
+namespace Naveego.DQ.ExternalQualityCheck
 {
     public class RunException
     {
