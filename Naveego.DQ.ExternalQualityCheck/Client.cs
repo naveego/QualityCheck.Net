@@ -113,18 +113,20 @@ namespace Naveego.DQ.ExternalQualityCheck
                 StartedAt = DateTime.UtcNow,
             };
 
-            this.Send("POST", "/v3/dataquality/runs/external", run);
+            var runJson = this.Send("POST", "/v3/dataquality/runs/external", run);
+
+            JsonConvert.PopulateObject(runJson, run);
 
             var qualityCheckRun = new QualityCheckRun(this, run);
 
             return qualityCheckRun;
         }
 
-        internal void Send(string method, string path, object data)
+        internal string Send(string method, string path, object data)
         {
             var json = JsonConvert.SerializeObject(data, jsonSerializerSettings);
             Log($"[Send] method: {method}, path:{path}, data: {json}");
-            this.Transport(method, path, json);
+            return this.Transport(method, path, json);
         }
 
         internal void Log(string message)

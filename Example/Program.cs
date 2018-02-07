@@ -44,6 +44,7 @@ namespace ExternalQualityCheckExample
                 var configuration = run.Configuration;
                 if (configuration != null)
                 {
+                    Console.WriteLine($"Found run configuration: {configuration}");
                     var jObject = JObject.Parse(configuration);
                     if (jObject["exceptionsCount"] != null)
                     {
